@@ -1,0 +1,68 @@
+name: Build 1r0pw
+on:
+  push:
+    branches: [main, master]
+    paths-ignore: ['keystore/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # If you uploaded project.zip from your phone, unpack it (workflows are never touched).
+      - name: Unpack project.zip (if present)
+        run: |
+          if [ -f project.zip ]; then
+            unzip -o project.zip -x '.github/*' '__MACOSX/*'
+            rm project.zip
+            echo "UNPACKED=1" >> $GITHUB_ENV
+          fi
+
+      # One persistent signing key, so every APK can update the previous one.
+      - name: Ensure signing key
+        run: |
+          if [ ! -f keystore/1r0pw.jks ]; then
+            mkdir -p keystore
+            keytool -genkeypair -v -keystore keystore/1r0pw.jks -alias r0pw \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass r0pw-keystore-2026 -keypass r0pw-keystore-2026 \
+              -dname "CN=1r0pw, O=1r0pw, C=US"
+            echo "NEWKEY=1" >> $GITHUB_ENV
+          fi
+
+      - name: Commit unpacked sources and key
+        if: env.UNPACKED == '1' || env.NEWKEY == '1'
+        run: |
+          git config user.name "1r0pw-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A
+          git commit -m "Update project files and signing key [skip ci]" || true
+          git push || true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Build signed APK and AAB
+        run: gradle --no-daemon assembleRelease bundleRelease
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 1r0pw-apk
+          path: app/build/outputs/apk/release/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 1r0pw-aab
+          path: app/build/outputs/bundle/release/*.aab
+          
